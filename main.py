@@ -11,23 +11,6 @@ import statsmodels.api as sm
 from statsmodels.tsa.arima.model import ARIMA
 import scipy.linalg as la
 
-#Plan for synthetic test case:
-
-#Implement the synthetic train/transfer test case
-
-#Parts to implement
-
-#Given dataset: train model
-
-#Automatic training of several models based on model size
-
-#Plotting of performance on the test cases
-
-#Generation of training and test data
-##Randomly generate AR process
-##Generate samples from AR process
-##
-
 class CustomDataset(Dataset):
 
     def __init__(self,dataset):
@@ -130,18 +113,7 @@ class Data:
 
     def getCoefVec(self):
         return self.TraincoefVec,self.TestcoefVec
-#Basic NN model
-#Perhaps LSTM is best, can we do a more simple model
-#Regression
-#Components: Dataloader
-#Model loss
-#Backprop step
-#Update params
-#Setup optimizer
-#Setup training objective
-#Log stuff
-#Save stuff
-#Change data format ot fit as a standard regression task
+
 
 class M1:
 
