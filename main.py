@@ -490,6 +490,11 @@ def main():
     experiment_config = {"1":True,"2":False,"3":False,"4":False,"5":False}
     params = {"train":train_params,"data":data_params}
     experiments(params,experiment_config)
+    # Experiment 1: Run Lasso,AR fitting, and basic MLP on the timeseries transfer task from transfer time series note
+    # Experiment 2: Only run Lasso
+    # Experiment 3: Only run AR fitting
+    # Experiment 4: Run an experiment from the AR_synthetics_fft note
+    # Experiment 5: Confirm that the calculations in experiment 4 are correct
 
 if __name__ == '__main__':
     main()
