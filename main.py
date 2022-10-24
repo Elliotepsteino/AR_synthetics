@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset
@@ -6,9 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from sklearn.linear_model import LinearRegression, Lasso
+from sklearn.linear_model import Lasso
 import statsmodels.api as sm
-from statsmodels.tsa.arima.model import ARIMA
 import scipy.linalg as la
 
 class CustomDataset(Dataset):
@@ -115,7 +115,7 @@ class Data:
         return self.TraincoefVec,self.TestcoefVec
 
 
-class M1:
+class MLP_trainer:
 
     def __init__(self,train_params, Train_data,Test_data):
         self.train_params = train_params
@@ -192,11 +192,9 @@ def create_and_train(data_params,train_params):
     Train_data, Test_data = dat.generate_data()
     assert (np.isnan(np.sum(Train_data))==False)
     assert (False==np.isnan(np.sum(Test_data)))
-    model = M1(train_params,Train_data,Test_data)
+    model = MLP_trainer(train_params,Train_data,Test_data)
     model.train()
     model.eval()
-    #Train_loss =model.get_train_loss()
-    #Test_loss =model.get_eval_loss()
 
     return model
 
@@ -219,6 +217,7 @@ def plot_results(L_test,H_range,L,L_bound,MSEerrLasso,LossAR,data_params):
 def fft_conv(c,phi):
     out = np.real(np.fft.fft(np.fft.fft(c)* np.fft.ifft(phi))[0:len(c)//2])
     return out
+
 def NN_coef(X,n,params):
     N = len(X) // 2
 
@@ -227,40 +226,19 @@ def NN_coef(X,n,params):
     Bhat = -c * b
     chat = c * np.concatenate((np.array([0]), X[0:N - 1][::-1], np.array([0]), X[N:2 * N - 1][::-1]))
     sr = 0
-    ###Testcode####################
-    if params["test"]:
-        assert len(Bhat) == N
+    if params["sr"]==True:
         col1 = np.concatenate((np.array([0]), X[N:2 * N - 1]))
-        assert len(col1) == N
         row1 = np.concatenate((np.array([0]), X[0:N - 1][::-1]))
-        assert len(row1) == N
         A = c * la.toeplitz(col1, row1)
-        sr = np.linalg.norm(np.linalg.eigvals(A),ord=np.inf)
-        Abar = np.zeros((2*N,2*N))
-        col2 = np.concatenate((np.array([0]),X[0:N-1]))
-        row2 = np.concatenate((np.array([0]),X[N:2*N-1][::-1]))
-        D = la.toeplitz(col2, row2)
-        Abar[:N,:N]=A
-        Abar[N:,N:] = A
-        Abar[:N,N:] = c*D
-        Abar[N:,N:] = c*D
+        evals = np.linalg.eigvals(A)
+        sr = np.linalg.norm(evals, np.inf)
 
-
-        #print("1  ",fft_conv(chat,np.concatenate((Bhat, np.zeros(N)))))
-        #print("2 ",np.matmul(Abar,np.concatenate((Bhat, np.zeros(N))))[:N])
-
-        #assert np.all(np.matmul(Abar,np.concatenate((Bhat, np.zeros(N))))[:N] ==fft_conv(chat,np.concatenate((Bhat, np.zeros(N)))))
-        #assert np.all(np.matmul(A,Bhat) ==fft_conv(chat,np.concatenate((Bhat, np.zeros(N)))))
-        assert np.all(chat == Abar[0,:])
-        assert len(chat)==2*N
-    #############################
     lam = params["lambda"]
     phi = np.zeros(N)
     for i in range(n):
         philong = np.concatenate((phi,np.zeros(N)))
         mm_res =fft_conv(chat,philong)
         phi = (1-lam)*(Bhat+mm_res)+lam*phi
-        #print("Phi: ",phi)
     y_pred = np.dot(X[N:2*N][::-1],phi)
     return phi,y_pred,sr
 
@@ -272,8 +250,9 @@ def experiments(params,experiment_config):
     if experiment_config["1"]:
         """Scaling of test loss as number of hidden dimensions increase"""
         #data_params = {"N":2,"Mhat":100,"M":10000,"M_tst":500,"Noise":0.1,"U":"unif","seed":42,"coef_sampling":"random"}
-        data_params = {"N": 2, "Mhat": 100, "M": 10000, "M_tst": 500, "Noise": 0.1, "U": "unif", "seed": 31,
-                       "coef_sampling": "random","r":0.9}
+        data_params["M"]= 10000
+        data_params["r"] = 0.9
+
         h_max = 8
         d_range = [i * i*i*4 for i in range(1, h_max + 1)]
         L_test = []
@@ -286,7 +265,7 @@ def experiments(params,experiment_config):
         assert (False == np.isnan(np.sum(Test_data)))
         for d in d_range:
             train_params["d"] = d
-            model = M1(train_params, Train_data, Test_data)
+            model = MLP_trainer(train_params, Train_data, Test_data)
             model.train()
             model.eval()
             L_test.append(model.get_eval_loss())
@@ -352,10 +331,9 @@ def experiments(params,experiment_config):
         print("Reg coef: ",coef)
         print("Reg intercept: ",intercept)
         print(np.mean(Ytrain))
-        pass
 
     if experiment_config["3"]:
-        """Retrain each sample using a timeseries model (cheating, as we give the AR order)"""
+        """Retrain each sample using a AR timeseries model (cheating, as we give the AR order)"""
         np.random.seed(data_params["seed"])
         torch.manual_seed(data_params["seed"])
         dat = Data(data_params)
@@ -363,8 +341,6 @@ def experiments(params,experiment_config):
         data_params["Mtst"] = 30
         data_params["Noise"] = 2
         Train_data, Test_data = dat.generate_data()
-        #Xtrain = Train_data[:-1, :].T
-        #Ytrain = Train_data[-1, :] we don't use train data, we train at inference
 
         Xtest = Test_data[:-1, :].T
         Loss = 0
@@ -372,40 +348,33 @@ def experiments(params,experiment_config):
         Ytest = Test_data[-1, :]
         for i in range(len(Xtest[:,0])):
             model = sm.tsa.ARIMA(endog=Xtest[i,:], exog=None, order=(data_params["N"], 0, 0), trend="n").fit()
-            #print(model.summary())
             coef = model.params[:-1]
             pred = np.dot(Xtest[i,:][-len(coef):][::-1],coef)
             Loss += np.dot(pred-Ytest[i],pred-Ytest[i])
             Base+= np.dot(Ytest[i],Ytest[i])
-            #print()
-            #print(model.param_names)
-            #print(model.model_orders)
         Loss/=len(Xtest[:,0])
         Base /=len(Xtest[:,0])
         print("AR LOSS:",Loss)
         print("Base loss: ",Base)
-            #yhat = model.predict(Xtest[i,:])
-            #print(yhat)
 
     if experiment_config["4"]:
-        """Test on the spacetime architecture"""
-        #Steps needed
-        #Create the conda environment to run the spacetime stuff in
-        #
-        #Load model (kernel and other classes)
-        #
-        #Train model on data (same data as other baselines
-        #Make predictions with model
-        #Merge the model predictions with the other predictions to create the comparison plot.
-        #
+        """Test the model described in the AR_synthetics_fft note"""
+
         N = 2
         Mhat = 2*N+1
         n = 30
-        data_params = {"N": N, "Mhat": Mhat, "M": 2, "M_tst": 100, "Noise": 0, "U": "unif", "seed": 42,
-                       "coef_sampling": "random","r":0.8,"n_iter":n,"test":True,"lambda":0.2}
+        data_params_AR = copy.deepcopy(data_params)
+        data_params_AR["N"] = N
+        data_params_AR["Mhat"] =Mhat
+        data_params_AR["M"] = 2
+        data_params_AR["M_tst"] = 50
+        data_params_AR["Noise"]=0
+        data_params_AR["r"] = 0.8
+        data_params_AR["n_iter"] = n
+
         np.random.seed(data_params["seed"])
         torch.manual_seed(data_params["seed"])
-        dat = Data(data_params)
+        dat = Data(data_params_AR)
         Train_data, Test_data = dat.generate_data()
 
         Xtest = Test_data[:-1, :]
@@ -414,20 +383,16 @@ def experiments(params,experiment_config):
         train_coef,test_coef = dat.getCoefVec()
         train_coef = train_coef[0]
 
-
-        print("Xtest: ", Xtest)
-
         coef_vec = []
         pred_vec = []
         sr_vec = []
-        for i in range(data_params["M_tst"]):
-            estimated_coef, y_pred,sr = NN_coef(Xtest[:,i],n,data_params)
+        for i in range(data_params_AR["M_tst"]):
+            estimated_coef, y_pred,sr = NN_coef(Xtest[:,i],n,data_params_AR)
             coef_vec.append(estimated_coef)
             pred_vec.append(y_pred)
             sr_vec.append(sr)
         pred_vec = np.array(pred_vec)
         sr_vec = np.array(sr_vec)
-        #MSE = np.dot(pred_vec-Ytest,pred_vec-Ytest)/len(Ytest)
         abs_err = np.abs(pred_vec-Ytest)/np.abs(Ytest)
         sort_ind = np.argsort(sr_vec)
         abs_err = abs_err[sort_ind][::-1]
@@ -438,55 +403,70 @@ def experiments(params,experiment_config):
                                               "with \n n ="+str(data_params["n_iter"])+" model layers/iterations. Error on one step forecast \nas a function of"
                                                                                                " spectral radius of transformed data matrix")
         plt.xlabel("Spectral Radius")
-        plt.ylabel("log(abs(y_pred_5-y_5)/abs(y_5))")
+        plt.ylabel("log(abs(y_pred_"+str(Mhat)+"-y_"+str(Mhat)+")/abs(y_"+str(Mhat)+"))")
 
         plt.show()
 
-        #print(abs_err)
-        #print(sr_vec)
-        #base = np.dot(Ytest,Ytest)/len(Ytest)
-        #print("MSE: ",MSE)
-       # print("base: ",base)
-        #print("Estimated coef")
-        #print(estimated_coef)
-        #print("train coef ", train_coef)
-
     if experiment_config["5"]:
-        """Test related to time series data"""
-        # Xtrain =np.squeeze(Xtrain)
-        # assert len(Xtrain) == 2*N
-        # print("Xtrain ",Xtrain)
-        # ypred = Xtrain[-1]*train_coef[0]+Xtrain[-2]*train_coef[1]
-        # print(ypred)
-        # print(Ytrain)
-        # print()
-        # c =-1/Xtrain[N-1]
-        # col1 = np.concatenate((np.array([0]),Xtrain[N:2*N-1]))
-        # assert len(col1)==N
-        # row1 = np.concatenate((np.array([0]),Xtrain[0:N-1][::-1]))
-        # assert len(row1) == N
-        # A = c*la.toeplitz(col1,row1)
-        # print("Asquiggle ",A)
-        # print("Normal A", A/c)
+        """Test that the implementation in the AR_synthetics_fft note is correct"""
+
+        N = 2
+        Mhat = 2 * N + 1
+        n = 30
+        data_params_AR = copy.deepcopy(data_params)
+        data_params_AR["N"] = N
+        data_params_AR["Mhat"] = Mhat
+        data_params_AR["M"] = 2
+        data_params_AR["M_tst"] = 100
+        data_params_AR["Noise"] = 0
+        data_params_AR["r"] = 0.8
+        data_params_AR["n_iter"] = n
+        np.random.seed(data_params["seed"])
+        torch.manual_seed(data_params["seed"])
+        dat = Data(data_params)
+        Train_data, Test_data = dat.generate_data()
+
+        Xtest = Test_data[:-1, :]
+        Ytest = Test_data[-1, :]
+        X = Xtest[:,0]
+        N = len(X) // 2
+
+        c = -1 / X[N - 1]
+        b = X[N:]
+        Bhat = -c * b
+        chat = c * np.concatenate((np.array([0]), X[0:N - 1][::-1], np.array([0]), X[N:2 * N - 1][::-1]))
+        sr = 0
+        col1 = np.concatenate((np.array([0]), X[N:2 * N - 1]))
+        assert len(col1) == N
+        row1 = np.concatenate((np.array([0]), X[0:N - 1][::-1]))
+        assert len(row1) == N
+        A = c * la.toeplitz(col1, row1)
         evals = np.linalg.eigvals(A)
-        # print("evals")
         print(evals)
         print("Spectral radius")
         print(np.linalg.norm(evals, np.inf))
 
-
-
-
-
-
-
-
-
-
-
-    #TODO
-    # Add performance of Timeseries model retrained on all samples in batch
-
+        assert len(Bhat) == N
+        col1 = np.concatenate((np.array([0]), X[N:2 * N - 1]))
+        assert len(col1) == N
+        row1 = np.concatenate((np.array([0]), X[0:N - 1][::-1]))
+        assert len(row1) == N
+        A = c * la.toeplitz(col1, row1)
+        sr = np.linalg.norm(np.linalg.eigvals(A), ord=np.inf)
+        Abar = np.zeros((2 * N, 2 * N))
+        col2 = np.concatenate((np.array([0]), X[0:N - 1]))
+        row2 = np.concatenate((np.array([0]), X[N:2 * N - 1][::-1]))
+        D = la.toeplitz(col2, row2)
+        Abar[:N, :N] = A
+        Abar[N:, N:] = A
+        Abar[:N, N:] = c * D
+        Abar[N:, N:] = c * D
+        eps = 10e-5
+        assert np.linalg.norm (np.matmul(Abar,np.concatenate((Bhat, np.zeros(N))))[:N]-fft_conv(chat,np.concatenate((Bhat, np.zeros(N)))))<eps
+        assert np.linalg.norm(np.matmul(A,Bhat) -fft_conv(chat,np.concatenate((Bhat, np.zeros(N)))))<eps
+        assert np.all(chat == Abar[0, :])
+        assert len(chat) == 2 * N
+        print("All tests passed")
 
 def main():
     #N = Degree of AR process
@@ -498,61 +478,19 @@ def main():
     #U = sampling distribution for initial points for each sample
     #seed = RNG initial seed
     #Noise = variance of noise
-    data_params = {"N":2,"Mhat":50,"M":500,"M_tst":500,"Noise":0.1,"U":"unif","seed":42,"coef_sampling":"random"}
-
+    #sr = get spectral radius
+    data_params = {"N":2,"Mhat":50,"M":500,"M_tst":500,"Noise":0.1,
+                   "U":"unif","seed":42,"coef_sampling":"random","r":1,"n_iter":50,"sr":True,"lambda":0.2}
 
     #lr = learning rate
     #h = model heads
     #d = hidden size
+    #Bs = batch size
     train_params = {"lr":0.00001,"h":5,"d":5,"Bs":50,"epochs":100}
-    ###
-    experiment_config = {"1":False,"2":False,"3":False,"4":True,"5":False}
+    experiment_config = {"1":True,"2":False,"3":False,"4":False,"5":False}
     params = {"train":train_params,"data":data_params}
     experiments(params,experiment_config)
 
-
-
-
-def test():
-    #test_AR_generator()
-    test_NN()
-
-
-def test_NN():
-    data_params = {"N": 4, "Mhat": 100, "M": 1000, "M_tst": 500, "Noise": True, "sig": 1, "U": "unif", "seed": 42,
-                   "coef_sampling": "random"}
-    train_params = {"lr": 0.0001, "h": 5, "d": 500, "Bs": 100, "epochs": 50}
-    np.random.seed(data_params["seed"])
-    torch.manual_seed(data_params["seed"])
-    dat = Data(data_params)
-
-    Train_data, Test_data = dat.generate_data()
-    assert (np.isnan(np.sum(Train_data)) == False)
-    assert (False == np.isnan(np.sum(Test_data)))
-    model = M1(train_params, Train_data, Test_data)
-    model.train()
-    model.eval()
-    Train_loss = model.get_train_loss()
-    Test_loss = model.get_eval_loss()
-    test_loss_vec = model.get_eval_lossVec()
-    print(test_loss_vec)
-
-
-def test_AR_generator():
-    data_params = {"N": 10, "Mhat": 200, "M": 3, "M_tst": 1, "Noise": True, "sig": 1, "U": "unif", "seed": 42,"coef_sampling":"random"}
-
-
-    dat = Data(data_params)
-
-    Train_data, Test_data = dat.generate_data()
-    print(dat.coef)
-    print(Train_data)
-
-
-
-
 if __name__ == '__main__':
-    #print([1,2,3][:-1])
-    #test()
     main()
 
